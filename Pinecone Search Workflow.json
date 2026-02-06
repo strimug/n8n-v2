@@ -1,0 +1,202 @@
+{
+  "name": "Pinecone Search Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pinecone-search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7db45e3a-6c7e-4baa-9144-2f8cc3962b43",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "pinecone-search-webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "const inputItem = $input.item;\nconst body = inputItem?.json?.body || inputItem?.json || {};\n\nconst query = body.query || body.body?.query;\n\nif (!query || typeof query !== 'string') {\n  throw new Error(`Query field is required. Received: ${JSON.stringify(body)}`);\n}\n\nreturn [{\n  json: {\n    query: query,\n    namespace: body.namespace || 'default'\n  }\n}];"
+      },
+      "id": "25c027d6-7686-409b-a309-0006f46b58f0",
+      "name": "Process Query",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"model\": \"text-embedding-3-large\",\n  \"input\": $json.query,\n  \"dimensions\": 3072\n} }}",
+        "options": {}
+      },
+      "id": "5579e575-d07d-467c-949a-38cdb5db2edb",
+      "name": "Get Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NdaefQxIn87hW0dO",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rag-demo-index-k6wh4mm.svc.aped-4627-b74a.pinecone.io/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"vector\": $('Get Query Embedding').item.json.data[0].embedding,\n  \"topK\": 12,\n  \"includeMetadata\": true,\n  \"namespace\": $('Process Query').item.json.namespace\n} }}",
+        "options": {}
+      },
+      "id": "bc95bf12-dacb-4895-9d96-163015e478ac",
+      "name": "Query Pinecone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        672,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "EsoO5K31E5RA1d29",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const matches = $input.item.json.matches || [];\n\nreturn matches.map(match => ({\n  json: {\n    text: match.metadata?.text || '',\n    score: match.score || 0,\n    source: match.metadata?.source || 'unknown',\n    chunk_index: match.metadata?.chunk_index || -1,\n    id: match.id\n  }\n}));"
+      },
+      "id": "d8fbcddd-3e0c-4613-9f04-4edcf8120112",
+      "name": "Format Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $input.all().map(item => item.json) }}",
+        "options": {}
+      },
+      "id": "a2764c49-b5a0-4852-b53f-de4af435cca6",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Query": {
+      "main": [
+        [
+          {
+            "node": "Get Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Query Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Pinecone": {
+      "main": [
+        [
+          {
+            "node": "Format Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Results": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "9be0505b-30ad-4219-9c37-6842041fe184",
+  "meta": {
+    "instanceId": "a74eafc2b34054b4dfc03b907435b8c31677354499354fe7f62965cba4ed4c51"
+  },
+  "id": "Sq0R-P4yzNQia03Tj85EA",
+  "tags": []
+}
